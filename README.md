@@ -6,8 +6,8 @@ account the total fees and total weight (i.e. include fees and weight of all par
 
 ### Final Output
 
-Total txns in block: 3263
-Total weight: 3992360
+Total txns in block: 3263  
+Total weight: 3992360  
 Total fees: 5795436
 
 ### Note
