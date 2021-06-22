@@ -2,26 +2,39 @@ import csv
 from concurrent.futures import ThreadPoolExecutor
 import copy
 
-# read the mempool csv
-with open (f"./mempool.csv", newline='') as f:
-    reader = csv.reader(f)
-    mempool_txns = list(reader)
-
+###############################
+##### GLOBAL VARIABLES ########
+###############################
 mempool_txns_dict = {}
+mempool_txns_dict_copy = {}
+
+# read the mempool csv
+def read_mempool():
+    with open (f"./mempool.csv", newline='') as f:
+        reader = csv.reader(f)
+        mempool_txns = list(reader)
+    
+    return mempool_txns
+
 
 # create a dictionary of the txns in the mempool for O[1] access
-for txn in mempool_txns:
-    txn_details = {}
-    txn_details['fees'] = int(txn[1])
-    txn_details['weight'] = int(txn[2])
-    txn_details['parent_txids'] = []
-    if txn[3] != '':
-        txn_details['parent_txids'] = txn[3].split(';')
+def build_mempool_dictionary(mempool_txns):
+    global mempool_txns_dict
+    global mempool_txns_dict_copy
 
-    mempool_txns_dict[txn[0]] = txn_details
+    for txn in mempool_txns:
+        txn_details = {}
+        txn_details['fees'] = int(txn[1])
+        txn_details['weight'] = int(txn[2])
+        txn_details['parent_txids'] = []
+        if txn[3] != '':
+            txn_details['parent_txids'] = txn[3].split(';')
 
-# create a copy of the mempool txns dict to access original data
-mempool_txns_dict_copy = copy.deepcopy(mempool_txns_dict)
+        mempool_txns_dict[txn[0]] = txn_details
+    
+    # create a copy of the mempool txns dict to access original data
+    mempool_txns_dict_copy = copy.deepcopy(mempool_txns_dict)
+
 
 ''' if a child txn is included in the list, then it means all its parent txns have to be included too.
 Hence it makes sense to get all the parents of a child txn and calculate their total fees and weight
@@ -47,51 +60,62 @@ def calculate_total_fee_rate(txn):
     
     mempool_txns_dict[txn]['fee_rate'] = mempool_txns_dict[txn]['fees']/mempool_txns_dict[txn]['weight']
 
-# Using multithreaded code to speed things up
-with ThreadPoolExecutor(max_workers=100) as executor:
-    results = executor.map(calculate_total_fee_rate, mempool_txns_dict)
 
-# sort mempool dictionary in descending order of fee rate
-sorted_mempool_dict = sorted(mempool_txns_dict.items(), key=lambda item: item[1]['fee_rate'], reverse=True)
+def build_final_list_of_txns():
+    # sort mempool dictionary in descending order of fee rate
+    sorted_mempool_dict = sorted(mempool_txns_dict.items(), key=lambda item: item[1]['fee_rate'], reverse=True)
 
-included_txns = [] # this is the final list that has to be returned
-included_txns_dict = {} # a dictionary to track which txns have already been included in the list
+    included_txns = [] # this is the final list that has to be returned
+    included_txns_dict = {} # a dictionary to track which txns have already been included in the list
 
-max_weight = 4000000
-total_weight = 0
-total_fees = 0
+    max_weight = 4000000
+    total_weight = 0
+    total_fees = 0
 
-for sorted_tx_id, sorted_txn in sorted_mempool_dict:
-    if total_weight + sorted_txn['weight'] <= 4000000:
-        txns_to_include = []
-        if sorted_tx_id not in included_txns_dict:
-            txns_to_include.append(sorted_tx_id)
-            total_weight += sorted_txn['weight']
-            total_fees += sorted_txn['fees']
-            included_txns_dict[sorted_tx_id] = 'Included'
+    for sorted_tx_id, sorted_txn in sorted_mempool_dict:
+        if total_weight + sorted_txn['weight'] <= max_weight:
+            txns_to_include = []
+            if sorted_tx_id not in included_txns_dict:
+                txns_to_include.append(sorted_tx_id)
+                total_weight += sorted_txn['weight']
+                total_fees += sorted_txn['fees']
+                included_txns_dict[sorted_tx_id] = 'Included'
 
-            ''' if parent txns for a txn have not been included in the list, we include them. We
-            don't need to worry about adding the parent txns fees and weight since they'll be included in the child txn.
-            If they have already been included in the list, then we need to subtract
-            their fees and weight since the newly added child txn's fees and weight will already 
-            include the parents' fees and weight:
-            '''
-            for parent_txn in sorted_txn['parent_txids']:
-                if parent_txn not in included_txns_dict:
-                    txns_to_include.append(parent_txn)
-                    included_txns_dict[parent_txn] = 'Included'
+                ''' if parent txns for a txn have not been included in the list, we include them. We
+                don't need to worry about adding the parent txns fees and weight since they'll be included in the child txn.
+                If they have already been included in the list, then we need to subtract
+                their fees and weight since the newly added child txn's fees and weight will already 
+                include the parents' fees and weight:
+                '''
+                for parent_txn in sorted_txn['parent_txids']:
+                    if parent_txn not in included_txns_dict:
+                        txns_to_include.append(parent_txn)
+                        included_txns_dict[parent_txn] = 'Included'
 
-                else:
-                    total_fees -= mempool_txns_dict_copy[parent_txn]['fees']
-                    total_weight -= mempool_txns_dict_copy[parent_txn]['weight']
+                    else:
+                        total_fees -= mempool_txns_dict_copy[parent_txn]['fees']
+                        total_weight -= mempool_txns_dict_copy[parent_txn]['weight']
 
-        txns_to_include.reverse() # to ensure that parents are included before children in the final list
-        included_txns.extend(txns_to_include)
-    else:
-        break
+            txns_to_include.reverse() # to ensure that parents are included before children in the final list
+            included_txns.extend(txns_to_include)
+        else:
+            break
 
-print(f"total weight: {total_weight}")
-print(f"total fees: {total_fees}")
-print(f"total txns: {len(included_txns)}")
+    print(f"total weight: {total_weight}")
+    print(f"total fees: {total_fees}")
+    print(f"total txns: {len(included_txns)}")
 
+    return included_txns
 
+def main():
+
+    mempool_txns = read_mempool()
+    build_mempool_dictionary(mempool_txns)
+
+    # Using multithreaded code to speed things up
+    with ThreadPoolExecutor(max_workers=100) as executor:
+        results = executor.map(calculate_total_fee_rate, mempool_txns_dict)
+
+    final_txns = build_final_list_of_txns()
+
+main()
