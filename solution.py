@@ -1,6 +1,7 @@
 import csv
 from concurrent.futures import ThreadPoolExecutor
 import copy
+import json
 
 ###############################
 ##### GLOBAL VARIABLES ########
@@ -24,13 +25,16 @@ def build_mempool_dictionary(mempool_txns):
 
     for txn in mempool_txns:
         txn_details = {}
-        txn_details['fees'] = int(txn[1])
-        txn_details['weight'] = int(txn[2])
-        txn_details['parent_txids'] = []
-        if txn[3] != '':
-            txn_details['parent_txids'] = txn[3].split(';')
+        try:
+            txn_details['fees'] = int(txn[1])
+            txn_details['weight'] = int(txn[2])
+            txn_details['parent_txids'] = []
+            if txn[3] != '':
+                txn_details['parent_txids'] = txn[3].split(';')
 
-        mempool_txns_dict[txn[0]] = txn_details
+            mempool_txns_dict[txn[0]] = txn_details
+        except:
+            continue # first line of csv may be string headers
     
     # create a copy of the mempool txns dict to access original data
     mempool_txns_dict_copy = copy.deepcopy(mempool_txns_dict)
@@ -52,7 +56,9 @@ def calculate_total_fee_rate(txn):
                 parent_txns.remove(parent_txn)
                 total_txn_fees += mempool_txns_dict_copy[parent_txn]['fees']
                 total_txn_weight += mempool_txns_dict_copy[parent_txn]['weight']
-                parent_txns.extend(mempool_txns_dict_copy[parent_txn]['parent_txids'])
+                for parent_tx in mempool_txns_dict_copy[parent_txn]['parent_txids']:
+                    if parent_tx not in parent_txns: # to ensure parent txns aren't duplicated in cyclic txns
+                        parent_txns.append(parent_tx)
 
         mempool_txns_dict[txn]['parent_txids'] = all_parents
         mempool_txns_dict[txn]['fees'] = total_txn_fees
@@ -115,7 +121,14 @@ def main():
     # Using multithreaded code to speed things up
     with ThreadPoolExecutor(max_workers=100) as executor:
         results = executor.map(calculate_total_fee_rate, mempool_txns_dict)
+    
+    # with open('result.json', 'w') as fp:
+    #     json.dump(mempool_txns_dict, fp)
 
     final_txns = build_final_list_of_txns()
+    block_file = open("block.txt", "w")
+    for txn in final_txns:
+        block_file.write(txn + "\n")
+    block_file.close()
 
 main()
